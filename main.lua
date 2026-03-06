@@ -1,11 +1,714 @@
-local url = "https://raw.githubusercontent.com/sarsilmazzz/Sars-Imaz-V1-FLY-ESP-SPEED/main/Sarsilmaz%20Script.txt"
+-- SARSILMAZ SCRIPTS - ESP + FLY + WALKSPEED v1 (Draggable + Resizable + Clean Toggles)
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
+local Camera = workspace.CurrentCamera
 
-local success, result = pcall(function()
-    return game:HttpGet(url)
+if not UserInputService then
+    warn("[SARSILMAZ SCRIPTS] UserInputService not found!")
+    return
+end
+
+-- ESP Settings
+local ESP_SETTINGS = {
+    Enabled = true,
+    FillColor = Color3.fromRGB(0, 140, 255),
+    FillTransparency = 0.30,
+    OutlineTransparency = 1,
+    Rainbow = false,
+    RainbowSpeed = 0.8
+}
+
+-- FLY Settings
+local FLY_SETTINGS = {
+    Enabled = false,
+    Speed = 60
+}
+
+-- WalkSpeed Settings
+local WALKSPEED_SETTINGS = {
+    Enabled = false,
+    Speed = 16
+}
+
+local flyConnection, bodyVelocity
+local rainbowConnection
+local originalWalkSpeed = 16
+
+local rainbowColors = {
+    Color3.fromRGB(228, 3, 3),
+    Color3.fromRGB(255, 140, 0),
+    Color3.fromRGB(255, 237, 0),
+    Color3.fromRGB(0, 128, 38),
+    Color3.fromRGB(0, 77, 255),
+    Color3.fromRGB(117, 7, 135)
+}
+
+-- ESP Functions
+local function updateAllESP()
+    for _, plr in Players:GetPlayers() do
+        if plr == LocalPlayer then continue end
+        if plr.Character then
+            local hl = plr.Character:FindFirstChild("Highlight")
+            if hl then
+                hl.Enabled = ESP_SETTINGS.Enabled
+                hl.OutlineTransparency = ESP_SETTINGS.OutlineTransparency
+                hl.FillTransparency = ESP_SETTINGS.FillTransparency
+                hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                if not ESP_SETTINGS.Rainbow then
+                    hl.FillColor = ESP_SETTINGS.FillColor
+                end
+            end
+        end
+    end
+end
+
+local function applyHighlight(character)
+    for _, child in character:GetChildren() do
+        if child:IsA("Highlight") then
+            child:Destroy()
+        end
+    end
+    local hl = Instance.new("Highlight")
+    hl.Name = "Highlight"
+    hl.Adornee = character
+    hl.Parent = character
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Enabled = ESP_SETTINGS.Enabled
+    hl.OutlineTransparency = ESP_SETTINGS.OutlineTransparency
+    hl.FillTransparency = ESP_SETTINGS.FillTransparency
+    hl.FillColor = ESP_SETTINGS.Rainbow and Color3.fromRGB(255,255,255) or ESP_SETTINGS.FillColor
+end
+
+for _, plr in Players:GetPlayers() do
+    if plr ~= LocalPlayer then
+        if plr.Character then
+            applyHighlight(plr.Character)
+        end
+        plr.CharacterAdded:Connect(applyHighlight)
+    end
+end
+
+Players.PlayerAdded:Connect(function(plr)
+    plr.CharacterAdded:Connect(applyHighlight)
 end)
 
-if success then
-    loadstring(result)()
-else
-    warn("Script yüklenemedi.")
+local function startRainbow()
+    if rainbowConnection then rainbowConnection:Disconnect() end
+    rainbowConnection = RunService.Heartbeat:Connect(function()
+        if not ESP_SETTINGS.Rainbow then
+            rainbowConnection:Disconnect()
+            rainbowConnection = nil
+            return
+        end
+        local t = tick() * ESP_SETTINGS.RainbowSpeed
+        local i = math.floor(t % #rainbowColors) + 1
+        local ni = (i % #rainbowColors) + 1
+        local f = t % 1
+        local col = rainbowColors[i]:Lerp(rainbowColors[ni], f)
+        for _, plr in Players:GetPlayers() do
+            if plr ~= LocalPlayer and plr.Character then
+                local hl = plr.Character:FindFirstChild("Highlight")
+                if hl then
+                    hl.FillColor = col
+                end
+            end
+        end
+    end)
 end
+
+local function startFly()
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local root = char.HumanoidRootPart
+    bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.MaxForce = Vector3.new(1e7, 1e7, 1e7)
+    bodyVelocity.Velocity = Vector3.zero
+    bodyVelocity.Parent = root
+
+    flyConnection = RunService.Heartbeat:Connect(function()
+        if not FLY_SETTINGS.Enabled or not root or not root.Parent then
+            stopFly()
+            return
+        end
+        local dir = Vector3.zero
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir -= Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.new(0,1,0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then dir -= Vector3.new(0,1,0) end
+
+        if dir.Magnitude > 0 then
+            bodyVelocity.Velocity = dir.Unit * FLY_SETTINGS.Speed
+        else
+            bodyVelocity.Velocity = Vector3.zero
+        end
+    end)
+end
+
+local function stopFly()
+    if flyConnection then flyConnection:Disconnect() flyConnection = nil end
+    if bodyVelocity then bodyVelocity:Destroy() bodyVelocity = nil end
+end
+
+local function updateWalkSpeed()
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChild("Humanoid") then
+        local humanoid = char.Humanoid
+        if WALKSPEED_SETTINGS.Enabled then
+            humanoid.WalkSpeed = WALKSPEED_SETTINGS.Speed
+        else
+            humanoid.WalkSpeed = originalWalkSpeed
+        end
+    end
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    local humanoid = char:WaitForChild("Humanoid", 5)
+    if humanoid then
+        originalWalkSpeed = humanoid.WalkSpeed
+        updateWalkSpeed()
+    end
+end)
+
+-- UI
+local function createConsole()
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "SarsilmazESP"
+    sg.ResetOnSpawn = false
+    sg.Parent = PlayerGui
+
+    local mf = Instance.new("Frame")
+    mf.Size = UDim2.new(0, 650, 0, 380)
+    mf.Position = UDim2.new(0.5, -325, 0.5, -190)
+    mf.BackgroundColor3 = Color3.fromRGB(15,15,15)
+    mf.BorderSizePixel = 0
+    mf.ClipsDescendants = true
+    mf.Parent = sg
+    Instance.new("UICorner", mf).CornerRadius = UDim.new(0,12)
+
+    local str = Instance.new("UIStroke", mf)
+    str.Color = Color3.fromRGB(60,60,60)
+    str.Thickness = 1.5
+
+    local tl = Instance.new("TextLabel", mf)
+    tl.Size = UDim2.new(1,0,0,50)
+    tl.BackgroundTransparency = 1
+    tl.Text = "SARSILMAZ SCRIPTS"
+    tl.TextColor3 = Color3.fromRGB(220,220,220)
+    tl.Font = Enum.Font.GothamBlack
+    tl.TextSize = 28
+    tl.TextXAlignment = Enum.TextXAlignment.Center
+
+    local vl = Instance.new("TextLabel", mf)
+    vl.Size = UDim2.new(1,0,0,18)
+    vl.Position = UDim2.new(0,0,0,45)
+    vl.BackgroundTransparency = 1
+    vl.Text = "ESP • FLY • SPEED • v3.5"
+    vl.TextColor3 = Color3.fromRGB(120,120,120)
+    vl.Font = Enum.Font.Gotham
+    vl.TextSize = 13
+    vl.TextXAlignment = Enum.TextXAlignment.Center
+
+    local cb = Instance.new("TextButton", mf)
+    cb.Size = UDim2.new(0,35,0,35)
+    cb.Position = UDim2.new(1,-40,0,8)
+    cb.BackgroundColor3 = Color3.fromRGB(50,50,50)
+    cb.Text = "×"
+    cb.TextColor3 = Color3.fromRGB(200,200,200)
+    cb.Font = Enum.Font.GothamBold
+    cb.TextSize = 22
+    Instance.new("UICorner", cb).CornerRadius = UDim.new(0,8)
+    cb.MouseButton1Click:Connect(function()
+        sg:Destroy()
+    end)
+
+    -- Draggable (Başlıktan sürükleme)
+    local dragging = false
+    local dragInput
+    local dragStart
+    local startPos
+
+    local function updateDrag(input)
+        local delta = input.Position - dragStart
+        mf.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+
+    tl.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = mf.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+
+    tl.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            dragInput = input
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            updateDrag(input)
+        end
+    end)
+
+    -- Resizable (Sağ alt köşeden boyut değiştirme)
+    local resizing = false
+    local resizeStart
+    local startSize
+
+    local resizeHandle = Instance.new("Frame")
+    resizeHandle.Size = UDim2.new(0, 20, 0, 20)
+    resizeHandle.Position = UDim2.new(1, -20, 1, -20)
+    resizeHandle.BackgroundColor3 = Color3.fromRGB(100,100,100)
+    resizeHandle.BackgroundTransparency = 0.4
+    resizeHandle.BorderSizePixel = 0
+    resizeHandle.Parent = mf
+    Instance.new("UICorner", resizeHandle).CornerRadius = UDim.new(0, 6)
+
+    local resizeIcon = Instance.new("TextLabel", resizeHandle)
+    resizeIcon.Size = UDim2.new(1,0,1,0)
+    resizeIcon.BackgroundTransparency = 1
+    resizeIcon.Text = "↘"
+    resizeIcon.TextColor3 = Color3.fromRGB(180,180,180)
+    resizeIcon.Font = Enum.Font.GothamBold
+    resizeIcon.TextSize = 16
+
+    resizeHandle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            resizing = true
+            resizeStart = input.Position
+            startSize = mf.Size
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then resizing = false end
+            end)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if resizing and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - resizeStart
+            local newWidth = math.clamp(startSize.X.Offset + delta.X, 500, 1100)
+            local newHeight = math.clamp(startSize.Y.Offset + delta.Y, 350, 750)
+            mf.Size = UDim2.new(0, newWidth, 0, newHeight)
+        end
+    end)
+
+    local tabFrame = Instance.new("Frame", mf)
+    tabFrame.Size = UDim2.new(1,-20,0,40)
+    tabFrame.Position = UDim2.new(0,10,0,75)
+    tabFrame.BackgroundTransparency = 1
+
+    local tabLayout = Instance.new("UIListLayout", tabFrame)
+    tabLayout.FillDirection = Enum.FillDirection.Horizontal
+    tabLayout.Padding = UDim.new(0,5)
+    tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+    local espContent, flyContent, speedContent
+
+    local function switchTab(tab)
+        espContent.Visible = (tab == "ESP")
+        flyContent.Visible = (tab == "FLY")
+        speedContent.Visible = (tab == "SPEED")
+    end
+
+    local function createTab(name, targetTab)
+        local btn = Instance.new("TextButton", tabFrame)
+        btn.Size = UDim2.new(0.33, -5, 1, 0)
+        btn.BackgroundColor3 = Color3.fromRGB(30,30,30)
+        btn.Text = name
+        btn.TextColor3 = Color3.fromRGB(220,220,220)
+        btn.Font = Enum.Font.GothamSemibold
+        btn.TextSize = 16
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0,8)
+
+        btn.MouseButton1Click:Connect(function()
+            for _, b in tabFrame:GetChildren() do
+                if b:IsA("TextButton") then
+                    b.BackgroundColor3 = (b == btn) and Color3.fromRGB(45,45,45) or Color3.fromRGB(30,30,30)
+                end
+            end
+            switchTab(targetTab)
+        end)
+    end
+
+    createTab("ESP", "ESP")
+    createTab("FLY", "FLY")
+    createTab("SPEED", "SPEED")
+
+    local contentFrame = Instance.new("Frame", mf)
+    contentFrame.Size = UDim2.new(1,-20,1,-130)
+    contentFrame.Position = UDim2.new(0,10,0,120)
+    contentFrame.BackgroundTransparency = 1
+
+    -- ESP Content (orijinalin aynısı)
+    espContent = Instance.new("ScrollingFrame", contentFrame)
+    espContent.Size = UDim2.new(1,0,1,0)
+    espContent.BackgroundTransparency = 1
+    espContent.ScrollBarThickness = 4
+    espContent.ScrollBarImageColor3 = Color3.fromRGB(80,80,80)
+    espContent.Visible = true
+
+    local espList = Instance.new("UIListLayout", espContent)
+    espList.Padding = UDim.new(0,6)
+
+    local function addColorButton(text, color, callback)
+        local frame = Instance.new("Frame", espContent)
+        frame.Size = UDim2.new(1,0,0,42)
+        frame.BackgroundTransparency = 1
+
+        local circle = Instance.new("Frame", frame)
+        circle.Size = UDim2.new(0,24,0,24)
+        circle.Position = UDim2.new(0,8,0.5,-12)
+        circle.BackgroundColor3 = color
+        Instance.new("UICorner", circle).CornerRadius = UDim.new(1,0)
+
+        local stroke = Instance.new("UIStroke", circle)
+        stroke.Color = Color3.fromRGB(255,255,255)
+        stroke.Transparency = 0.6
+        stroke.Thickness = 1.5
+
+        local button = Instance.new("TextButton", frame)
+        button.Size = UDim2.new(1,-50,1,0)
+        button.Position = UDim2.new(0,45,0,0)
+        button.BackgroundColor3 = Color3.fromRGB(35,35,35)
+        button.Text = text
+        button.TextColor3 = Color3.fromRGB(230,230,230)
+        button.Font = Enum.Font.GothamSemibold
+        button.TextSize = 15
+        button.TextXAlignment = Enum.TextXAlignment.Left
+        Instance.new("UICorner", button).CornerRadius = UDim.new(0,8)
+
+        button.MouseEnter:Connect(function()
+            TweenService:Create(button, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(50,50,50)}):Play()
+        end)
+        button.MouseLeave:Connect(function()
+            TweenService:Create(button, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(35,35,35)}):Play()
+        end)
+        button.MouseButton1Click:Connect(callback)
+    end
+
+    addColorButton("Blue", Color3.fromRGB(0,140,255), function()
+        ESP_SETTINGS.Rainbow = false
+        ESP_SETTINGS.FillColor = Color3.fromRGB(0,140,255)
+        updateAllESP()
+    end)
+
+    addColorButton("Red", Color3.fromRGB(220,20,60), function()
+        ESP_SETTINGS.Rainbow = false
+        ESP_SETTINGS.FillColor = Color3.fromRGB(220,20,60)
+        updateAllESP()
+    end)
+
+    addColorButton("Green", Color3.fromRGB(0,220,80), function()
+        ESP_SETTINGS.Rainbow = false
+        ESP_SETTINGS.FillColor = Color3.fromRGB(0,220,80)
+        updateAllESP()
+    end)
+
+    addColorButton("Purple", Color3.fromRGB(180,0,255), function()
+        ESP_SETTINGS.Rainbow = false
+        ESP_SETTINGS.FillColor = Color3.fromRGB(180,0,255)
+        updateAllESP()
+    end)
+
+    addColorButton("Yellow", Color3.fromRGB(255,200,0), function()
+        ESP_SETTINGS.Rainbow = false
+        ESP_SETTINGS.FillColor = Color3.fromRGB(255,200,0)
+        updateAllESP()
+    end)
+
+    local rainbowFrame = Instance.new("Frame", espContent)
+    rainbowFrame.Size = UDim2.new(1,0,0,42)
+    rainbowFrame.BackgroundTransparency = 1
+
+    local rainbowCircle = Instance.new("Frame", rainbowFrame)
+    rainbowCircle.Size = UDim2.new(0,24,0,24)
+    rainbowCircle.Position = UDim2.new(0,8,0.5,-12)
+    rainbowCircle.BackgroundColor3 = Color3.fromRGB(140,140,140)
+    Instance.new("UICorner", rainbowCircle).CornerRadius = UDim.new(1,0)
+
+    local rainbowStroke = Instance.new("UIStroke", rainbowCircle)
+    rainbowStroke.Color = Color3.fromRGB(255,255,255)
+    rainbowStroke.Transparency = 0.6
+    rainbowStroke.Thickness = 1.5
+
+    local rainbowButton = Instance.new("TextButton", rainbowFrame)
+    rainbowButton.Size = UDim2.new(1,-50,1,0)
+    rainbowButton.Position = UDim2.new(0,45,0,0)
+    rainbowButton.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    rainbowButton.Text = "Rainbow"
+    rainbowButton.TextColor3 = Color3.fromRGB(230,230,230)
+    rainbowButton.Font = Enum.Font.GothamSemibold
+    rainbowButton.TextSize = 15
+    rainbowButton.TextXAlignment = Enum.TextXAlignment.Left
+    Instance.new("UICorner", rainbowButton).CornerRadius = UDim.new(0,8)
+
+    local rainbowCircleConn = RunService.Heartbeat:Connect(function()
+        if not rainbowFrame.Parent then rainbowCircleConn:Disconnect() return end
+        if not ESP_SETTINGS.Rainbow then
+            rainbowCircle.BackgroundColor3 = Color3.fromRGB(140,140,140)
+            return
+        end
+        local t = tick() * ESP_SETTINGS.RainbowSpeed * 1.4
+        local i = math.floor(t % #rainbowColors) + 1
+        local ni = (i % #rainbowColors) + 1
+        local f = t % 1
+        rainbowCircle.BackgroundColor3 = rainbowColors[i]:Lerp(rainbowColors[ni], f)
+    end)
+
+    rainbowButton.MouseButton1Click:Connect(function()
+        ESP_SETTINGS.Rainbow = not ESP_SETTINGS.Rainbow
+        if ESP_SETTINGS.Rainbow then
+            startRainbow()
+        else
+            if rainbowConnection then rainbowConnection:Disconnect() rainbowConnection = nil end
+            updateAllESP()
+        end
+    end)
+
+    local transLabel = Instance.new("TextLabel", espContent)
+    transLabel.Size = UDim2.new(1,0,0,22)
+    transLabel.BackgroundTransparency = 1
+    transLabel.Text = "Transparency: " .. string.format("%.2f", ESP_SETTINGS.FillTransparency)
+    transLabel.TextColor3 = Color3.fromRGB(180,180,180)
+    transLabel.Font = Enum.Font.Gotham
+    transLabel.TextSize = 14
+
+    local transBg = Instance.new("Frame", espContent)
+    transBg.Size = UDim2.new(1,0,0,28)
+    transBg.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    Instance.new("UICorner", transBg).CornerRadius = UDim.new(0,8)
+
+    local transFill = Instance.new("Frame", transBg)
+    transFill.Size = UDim2.new(ESP_SETTINGS.FillTransparency,0,1,0)
+    transFill.BackgroundColor3 = Color3.fromRGB(100,100,100)
+    Instance.new("UICorner", transFill).CornerRadius = UDim.new(0,8)
+
+    transBg.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        local function update()
+            local mouse = UserInputService:GetMouseLocation()
+            local ratio = math.clamp((mouse.X - transBg.AbsolutePosition.X) / transBg.AbsoluteSize.X, 0, 1)
+            ESP_SETTINGS.FillTransparency = ratio
+            transFill.Size = UDim2.new(ratio,0,1,0)
+            transLabel.Text = "Transparency: " .. string.format("%.2f", ratio)
+            updateAllESP()
+        end
+        update()
+        local moveConn = UserInputService.InputChanged:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseMovement then update() end
+        end)
+        local endConn = UserInputService.InputEnded:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                moveConn:Disconnect()
+                endConn:Disconnect()
+            end
+        end)
+    end)
+
+    local rsLabel = Instance.new("TextLabel", espContent)
+    rsLabel.Size = UDim2.new(1,0,0,22)
+    rsLabel.BackgroundTransparency = 1
+    rsLabel.Text = "Rainbow Speed: " .. string.format("%.1f", ESP_SETTINGS.RainbowSpeed)
+    rsLabel.TextColor3 = Color3.fromRGB(180,180,180)
+    rsLabel.Font = Enum.Font.Gotham
+    rsLabel.TextSize = 14
+
+    local rsBg = Instance.new("Frame", espContent)
+    rsBg.Size = UDim2.new(1,0,0,28)
+    rsBg.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    Instance.new("UICorner", rsBg).CornerRadius = UDim.new(0,8)
+
+    local rsFill = Instance.new("Frame", rsBg)
+    rsFill.Size = UDim2.new((ESP_SETTINGS.RainbowSpeed - 0.2)/2.8,0,1,0)
+    rsFill.BackgroundColor3 = Color3.fromRGB(140,80,255)
+    Instance.new("UICorner", rsFill).CornerRadius = UDim.new(0,8)
+
+    rsBg.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        local function update()
+            local mouse = UserInputService:GetMouseLocation()
+            local ratio = math.clamp((mouse.X - rsBg.AbsolutePosition.X) / rsBg.AbsoluteSize.X, 0, 1)
+            ESP_SETTINGS.RainbowSpeed = 0.2 + ratio * 2.8
+            rsFill.Size = UDim2.new(ratio,0,1,0)
+            rsLabel.Text = "Rainbow Speed: " .. string.format("%.1f", ESP_SETTINGS.RainbowSpeed)
+        end
+        update()
+        local moveConn = UserInputService.InputChanged:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseMovement then update() end
+        end)
+        local endConn = UserInputService.InputEnded:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                moveConn:Disconnect()
+                endConn:Disconnect()
+            end
+        end)
+    end)
+
+    -- FLY Content
+    flyContent = Instance.new("Frame", contentFrame)
+    flyContent.Size = UDim2.new(1,0,1,0)
+    flyContent.BackgroundTransparency = 1
+    flyContent.Visible = false
+
+    local flyToggle = Instance.new("TextButton", flyContent)
+    flyToggle.Size = UDim2.new(1,0,0,60)
+    flyToggle.Position = UDim2.new(0,0,0,20)
+    flyToggle.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    flyToggle.Text = "Fly"
+    flyToggle.TextColor3 = Color3.fromRGB(180,180,180)
+    flyToggle.Font = Enum.Font.GothamBlack
+    flyToggle.TextSize = 28
+    Instance.new("UICorner", flyToggle).CornerRadius = UDim.new(0,12)
+
+    flyToggle.MouseButton1Click:Connect(function()
+        FLY_SETTINGS.Enabled = not FLY_SETTINGS.Enabled
+        if FLY_SETTINGS.Enabled then
+            flyToggle.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+            flyToggle.TextColor3 = Color3.fromRGB(255,255,255)
+            startFly()
+        else
+            flyToggle.BackgroundColor3 = Color3.fromRGB(35,35,35)
+            flyToggle.TextColor3 = Color3.fromRGB(180,180,180)
+            stopFly()
+        end
+    end)
+
+    local flySpeedLabel = Instance.new("TextLabel", flyContent)
+    flySpeedLabel.Size = UDim2.new(1,0,0,30)
+    flySpeedLabel.Position = UDim2.new(0,0,0,100)
+    flySpeedLabel.BackgroundTransparency = 1
+    flySpeedLabel.Text = "Fly Speed: " .. FLY_SETTINGS.Speed
+    flySpeedLabel.TextColor3 = Color3.fromRGB(180,180,180)
+    flySpeedLabel.Font = Enum.Font.Gotham
+    flySpeedLabel.TextSize = 18
+
+    local flySliderBg = Instance.new("Frame", flyContent)
+    flySliderBg.Size = UDim2.new(0.8,0,0,40)
+    flySliderBg.Position = UDim2.new(0.1,0,0,140)
+    flySliderBg.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    Instance.new("UICorner", flySliderBg).CornerRadius = UDim.new(0,12)
+
+    local flySliderFill = Instance.new("Frame", flySliderBg)
+    flySliderFill.Size = UDim2.new((FLY_SETTINGS.Speed - 20)/130,0,1,0)
+    flySliderFill.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+    Instance.new("UICorner", flySliderFill).CornerRadius = UDim.new(0,12)
+
+    flySliderBg.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        local function update()
+            local mouse = UserInputService:GetMouseLocation()
+            local ratio = math.clamp((mouse.X - flySliderBg.AbsolutePosition.X) / flySliderBg.AbsoluteSize.X, 0, 1)
+            FLY_SETTINGS.Speed = 20 + math.floor(ratio * 130)
+            flySliderFill.Size = UDim2.new(ratio,0,1,0)
+            flySpeedLabel.Text = "Fly Speed: " .. FLY_SETTINGS.Speed
+        end
+        update()
+        local moveConn = UserInputService.InputChanged:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseMovement then update() end
+        end)
+        local endConn = UserInputService.InputEnded:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                moveConn:Disconnect()
+                endConn:Disconnect()
+            end
+        end)
+    end)
+
+    -- SPEED Content
+    speedContent = Instance.new("Frame", contentFrame)
+    speedContent.Size = UDim2.new(1,0,1,0)
+    speedContent.BackgroundTransparency = 1
+    speedContent.Visible = false
+
+    local wsToggle = Instance.new("TextButton", speedContent)
+    wsToggle.Size = UDim2.new(1,0,0,60)
+    wsToggle.Position = UDim2.new(0,0,0,20)
+    wsToggle.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    wsToggle.Text = "Speed"
+    wsToggle.TextColor3 = Color3.fromRGB(180,180,180)
+    wsToggle.Font = Enum.Font.GothamBlack
+    wsToggle.TextSize = 28
+    Instance.new("UICorner", wsToggle).CornerRadius = UDim.new(0,12)
+
+    wsToggle.MouseButton1Click:Connect(function()
+        WALKSPEED_SETTINGS.Enabled = not WALKSPEED_SETTINGS.Enabled
+        if WALKSPEED_SETTINGS.Enabled then
+            wsToggle.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+            wsToggle.TextColor3 = Color3.fromRGB(255,255,255)
+        else
+            wsToggle.BackgroundColor3 = Color3.fromRGB(35,35,35)
+            wsToggle.TextColor3 = Color3.fromRGB(180,180,180)
+        end
+        updateWalkSpeed()
+    end)
+
+    local wsLabel = Instance.new("TextLabel", speedContent)
+    wsLabel.Size = UDim2.new(1,0,0,30)
+    wsLabel.Position = UDim2.new(0,0,0,100)
+    wsLabel.BackgroundTransparency = 1
+    wsLabel.Text = "Walk Speed: " .. WALKSPEED_SETTINGS.Speed
+    wsLabel.TextColor3 = Color3.fromRGB(180,180,180)
+    wsLabel.Font = Enum.Font.Gotham
+    wsLabel.TextSize = 18
+
+    local wsSliderBg = Instance.new("Frame", speedContent)
+    wsSliderBg.Size = UDim2.new(0.8,0,0,40)
+    wsSliderBg.Position = UDim2.new(0.1,0,0,140)
+    wsSliderBg.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    Instance.new("UICorner", wsSliderBg).CornerRadius = UDim.new(0,12)
+
+    local wsSliderFill = Instance.new("Frame", wsSliderBg)
+    wsSliderFill.Size = UDim2.new((WALKSPEED_SETTINGS.Speed - 10)/90,0,1,0)
+    wsSliderFill.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+    Instance.new("UICorner", wsSliderFill).CornerRadius = UDim.new(0,12)
+
+    wsSliderBg.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        local function update()
+            local mouse = UserInputService:GetMouseLocation()
+            local ratio = math.clamp((mouse.X - wsSliderBg.AbsolutePosition.X) / wsSliderBg.AbsoluteSize.X, 0, 1)
+            WALKSPEED_SETTINGS.Speed = 10 + math.floor(ratio * 90)
+            wsSliderFill.Size = UDim2.new(ratio,0,1,0)
+            wsLabel.Text = "Walk Speed: " .. WALKSPEED_SETTINGS.Speed
+            updateWalkSpeed()
+        end
+        update()
+        local moveConn = UserInputService.InputChanged:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseMovement then update() end
+        end)
+        local endConn = UserInputService.InputEnded:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                moveConn:Disconnect()
+                endConn:Disconnect()
+            end
+        end)
+    end)
+
+    switchTab("ESP")
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.Insert then
+        local cons = PlayerGui:FindFirstChild("SarsilmazESP")
+        if cons then
+            cons:Destroy()
+        else
+            createConsole()
+        end
+    end
+end)
+
+updateAllESP()
+print("[SARSILMAZ SCRIPTS] v1 Loaded! Press Insert to toggle menu")
